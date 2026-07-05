@@ -9,3 +9,13 @@ export const validateGoogleCredential = (req, res, next) => {
 
   next();
 };
+
+export const validateRefreshToken = (req, res, next) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken || typeof refreshToken !== "string") {
+    return next(new ApiError(400, "Refresh token is required"));
+  }
+
+  next();
+};

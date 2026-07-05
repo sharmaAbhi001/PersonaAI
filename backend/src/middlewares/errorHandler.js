@@ -18,13 +18,16 @@ const errorHandler = (error, req, res, next) => {
       ? normalized.message || "Internal Server Error"
       : "Internal Server Error";
 
-  logError("request", normalized, {
-    method: req.method,
-    path: req.originalUrl,
-    statusCode,
-    operational: isOperational,
-    userId: req.user?.userId,
-  });
+  // Only log 5xx — client errors (4xx) are expected and flood memory if logged
+  if (statusCode >= 500) {
+    logError("request", normalized, {
+      method: req.method,
+      path: req.originalUrl,
+      statusCode,
+      operational: isOperational,
+      userId: req.user?.userId,
+    });
+  }
 
   res.status(statusCode).json({
     success: false,

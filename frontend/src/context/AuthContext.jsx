@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
+import {
+  clearTokens,
+  getRefreshToken,
+  hasTokens,
+  setTokens,
+} from "@/lib/auth-tokens";
 
 const AuthContext = createContext(null);
 
@@ -22,12 +28,23 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const refreshAuth = useCallback(async () => {
+    if (!hasTokens()) {
+      setUser(null);
+      return null;
+    }
+
     try {
       const response = await api.get("/auth/me");
       const nextUser = parseUserFromMeResponse(response);
       setUser(nextUser);
+
+      if (!nextUser) {
+        clearTokens();
+      }
+
       return nextUser;
     } catch {
+      clearTokens();
       setUser(null);
       return null;
     }
@@ -37,20 +54,28 @@ export function AuthProvider({ children }) {
     refreshAuth().finally(() => setLoading(false));
   }, [refreshAuth]);
 
-  const login = useCallback((authUser) => {
+  const login = useCallback((authUser, tokens) => {
+    if (tokens?.accessToken && tokens?.refreshToken) {
+      setTokens(tokens);
+    }
+
     if (authUser?.id) {
       setUser(authUser);
       return;
     }
+
     return refreshAuth();
   }, [refreshAuth]);
 
   const logout = useCallback(async () => {
+    const refreshToken = getRefreshToken();
+
     try {
-      await api.post("/auth/logout");
+      await api.post("/auth/logout", refreshToken ? { refreshToken } : {});
     } catch (error) {
       console.error("Logout failed:", error);
     } finally {
+      clearTokens();
       setUser(null);
     }
   }, []);

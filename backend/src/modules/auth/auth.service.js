@@ -1,12 +1,16 @@
+import { createHash, randomBytes } from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import jwt from "jsonwebtoken";
 import jwksClient from "jwks-rsa";
 import prisma from "../../config/prisma.js";
 import { ApiError } from "../../utils/ApiError.js";
 import axios from "axios";
+
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+const ACCESS_TOKEN_TYPE = "access";
+const DEFAULT_ACCESS_EXPIRES_IN = "15m";
+const DEFAULT_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 
 const formatUser = (user) => ({
   id: user.id,
@@ -14,6 +18,159 @@ const formatUser = (user) => ({
   name: user.name,
   avatar: user.avatar,
 });
+
+const parseDurationMs = (value, fallbackMs) => {
+  if (!value) return fallbackMs;
+
+  const match = String(value).trim().match(/^(\d+)(ms|s|m|h|d)$/);
+  if (!match) return fallbackMs;
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const multipliers = {
+    ms: 1,
+    s: 1000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+  };
+
+  return amount * multipliers[unit];
+};
+
+export const getAccessSecret = () => {
+  const secret = process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET;
+
+  if (!secret) {
+    throw new ApiError(500, "JWT_ACCESS_SECRET is not configured");
+  }
+
+  return secret;
+};
+
+const hashToken = (token) =>
+  createHash("sha256").update(token).digest("hex");
+
+const generateOpaqueToken = () => randomBytes(32).toString("base64url");
+
+const generateFamilyId = () => randomBytes(16).toString("hex");
+
+export const signAccessToken = (userId) => {
+  return jwt.sign(
+    { userId, type: ACCESS_TOKEN_TYPE },
+    getAccessSecret(),
+    {
+      expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || DEFAULT_ACCESS_EXPIRES_IN,
+    }
+  );
+};
+
+const createRefreshToken = async (userId, familyId = generateFamilyId()) => {
+  const token = generateOpaqueToken();
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(
+    Date.now() +
+      parseDurationMs(process.env.JWT_REFRESH_EXPIRES_IN, DEFAULT_REFRESH_MS)
+  );
+
+  const row = await prisma.refreshToken.create({
+    data: {
+      userId,
+      tokenHash,
+      familyId,
+      expiresAt,
+    },
+  });
+
+  return { token, id: row.id, familyId };
+};
+
+export const issueTokenPair = async (userId) => {
+  const accessToken = signAccessToken(userId);
+  const { token: refreshToken } = await createRefreshToken(userId);
+
+  return { accessToken, refreshToken };
+};
+
+const revokeFamily = async (familyId) => {
+  await prisma.refreshToken.updateMany({
+    where: { familyId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+};
+
+export const rotateRefreshToken = async (rawRefreshToken) => {
+  if (!rawRefreshToken || typeof rawRefreshToken !== "string") {
+    throw new ApiError(401, "Invalid or expired refresh token");
+  }
+
+  const tokenHash = hashToken(rawRefreshToken);
+  const existing = await prisma.refreshToken.findUnique({
+    where: { tokenHash },
+  });
+
+  if (!existing) {
+    throw new ApiError(401, "Invalid or expired refresh token");
+  }
+
+  if (existing.revokedAt) {
+    await revokeFamily(existing.familyId);
+    throw new ApiError(401, "Invalid or expired refresh token");
+  }
+
+  if (existing.expiresAt <= new Date()) {
+    await prisma.refreshToken.update({
+      where: { id: existing.id },
+      data: { revokedAt: new Date() },
+    });
+    throw new ApiError(401, "Invalid or expired refresh token");
+  }
+
+  const { token: refreshToken, id: newTokenId } = await createRefreshToken(
+    existing.userId,
+    existing.familyId
+  );
+
+  await prisma.refreshToken.update({
+    where: { id: existing.id },
+    data: {
+      revokedAt: new Date(),
+      replacedById: newTokenId,
+    },
+  });
+
+  return {
+    accessToken: signAccessToken(existing.userId),
+    refreshToken,
+  };
+};
+
+export const revokeRefreshToken = async (rawRefreshToken) => {
+  if (!rawRefreshToken || typeof rawRefreshToken !== "string") {
+    return;
+  }
+
+  const tokenHash = hashToken(rawRefreshToken);
+  const existing = await prisma.refreshToken.findUnique({
+    where: { tokenHash },
+  });
+
+  if (!existing || existing.revokedAt) {
+    return;
+  }
+
+  await prisma.refreshToken.update({
+    where: { id: existing.id },
+    data: { revokedAt: new Date() },
+  });
+};
+
+export const revokeAllUserRefreshTokens = async (userId) => {
+  await prisma.refreshToken.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+};
 
 const verifyGoogleCredential = async (credential) => {
   if (!process.env.GOOGLE_CLIENT_ID) {
@@ -42,16 +199,6 @@ const verifyGoogleCredential = async (credential) => {
     name: payload.name || null,
     avatar: payload.picture || null,
   };
-};
-
-const signToken = (userId) => {
-  if (!process.env.JWT_SECRET) {
-    throw new ApiError(500, "JWT_SECRET is not configured");
-  }
-
-  return jwt.sign({ userId }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
-  });
 };
 
 const findOrLinkGoogleUser = async (profile) => {
@@ -90,20 +237,14 @@ const findOrLinkGoogleUser = async (profile) => {
   });
 };
 
-export const getCookieOptions = () => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  maxAge: COOKIE_MAX_AGE,
-});
-
 export const googleAuth = async (credential) => {
   const profile = await verifyGoogleCredential(credential);
   const user = await findOrLinkGoogleUser(profile);
+  const tokens = await issueTokenPair(user.id);
 
   return {
     user: formatUser(user),
-    token: signToken(user.id),
+    ...tokens,
   };
 };
 
@@ -220,8 +361,10 @@ export const googleSignup = async (code, codeVerifier) => {
     avatar: decodedToken.picture || null,
   });
 
+  const tokens = await issueTokenPair(user.id);
+
   return {
     user: formatUser(user),
-    token: signToken(user.id),
+    ...tokens,
   };
 };

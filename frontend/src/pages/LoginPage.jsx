@@ -67,7 +67,11 @@ export default function LoginPage() {
       const response = await api.post("/auth/google", {
         credential: credentialResponse.credential,
       });
-      login(response.data?.data?.user);
+      const data = response.data?.data;
+      login(data?.user, {
+        accessToken: data?.accessToken,
+        refreshToken: data?.refreshToken,
+      });
       navigate("/chat", { replace: true });
     } catch (err) {
       const message =
@@ -119,7 +123,11 @@ export default function LoginPage() {
           code,
           codeVerifier,
         });
-        login(response.data?.data?.user);
+        const data = response.data?.data;
+        login(data?.user, {
+          accessToken: data?.accessToken,
+          refreshToken: data?.refreshToken,
+        });
         setSearchParams({}, { replace: true });
         navigate("/chat", { replace: true });
       } catch (err) {
