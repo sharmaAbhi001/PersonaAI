@@ -6,8 +6,21 @@ import {
   setTokens,
 } from "@/lib/auth-tokens";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+const normalizeApiBaseUrl = (url) => {
+  const trimmed = (url || "http://localhost:8000/api").trim().replace(/\/+$/, "");
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
+  return `https://${trimmed}`;
+};
+
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
