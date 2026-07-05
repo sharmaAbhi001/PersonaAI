@@ -1,24 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Loader2, Menu, MessageSquarePlus, Send, X } from "lucide-react";
+import { Loader2, Menu, MessageSquarePlus, Send } from "lucide-react";
 import api from "@/lib/api";
 import {
   getPersonaById,
   getStoredPersonaId,
   hasSeenPersonaSwitchWarning,
   markPersonaSwitchWarningSeen,
-  PERSONAS,
   setStoredPersonaId,
 } from "@/lib/personas";
 import { useAuth } from "@/context/AuthContext";
 import PersonaSwitchDialog from "@/components/PersonaSwitchDialog";
 import ThemeToggle from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { SidePanel } from "@/components/ui/sidePanel";
 
 const TYPEWRITER_INTERVAL_MS = 20;
 const TYPEWRITER_CHARS_PER_TICK = 3;
@@ -45,18 +42,6 @@ function getCharsPerTick(contentLength) {
   if (contentLength > 2000) return 8;
   if (contentLength > 800) return 5;
   return TYPEWRITER_CHARS_PER_TICK;
-}
-
-function getInitials(name, email) {
-  if (name?.trim()) {
-    return name
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("");
-  }
-  return email?.[0]?.toUpperCase() ?? "U";
 }
 
 const URL_PATTERN = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=[^\s]+|youtu\.be\/[^\s]+))/g;
@@ -359,134 +344,6 @@ export default function ChatPage() {
     conversations.find((item) => item.id === conversationId)?.title ??
     "New Chat";
 
-  const sidebarPanel = (
-    <>
-      <div className="flex items-center gap-2 p-3">
-        <Button
-          variant="outline"
-          className="flex-1 justify-start gap-2 border-sidebar-border bg-sidebar-accent/50 hover:bg-sidebar-accent"
-          onClick={handleNewChat}
-          disabled={isBusy}
-        >
-          <MessageSquarePlus className="size-4" />
-          New chat
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="shrink-0 md:hidden"
-          onClick={closeSidebar}
-          aria-label="Close sidebar"
-        >
-          <X className="size-4" />
-        </Button>
-      </div>
-
-      <Separator className="bg-sidebar-border" />
-
-      <ScrollArea className="min-h-0 flex-1 px-2 py-2">
-        {isLoadingConversations ? (
-          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-            <Loader2 className="mr-2 size-4 animate-spin" />
-            Loading...
-          </div>
-        ) : conversations.length === 0 ? (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            No conversations yet
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {conversations.map((item) => {
-              const isActive = item.id === conversationId;
-              const personaInitial =
-                getPersonaById(item.personaId)?.initial ?? "P";
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleSelectConversation(item.id)}
-                  disabled={isBusy}
-                  className={`flex w-full items-center gap-2 truncate rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
-                    isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground/80 hover:bg-sidebar-accent/60"
-                  }`}
-                  title={item.title}
-                >
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold">
-                    {personaInitial}
-                  </span>
-                  <span className="truncate">{item.title}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </ScrollArea>
-
-      <Separator className="bg-sidebar-border" />
-
-      <div className="p-3">
-        <p className="mb-2 px-1 text-xs font-medium text-muted-foreground">
-          Mentor
-        </p>
-        <Card className="gap-0 py-0 ring-sidebar-border">
-          <CardContent className="space-y-1 p-2">
-            {PERSONAS.map((persona) => {
-              const isSelected = persona.id === selectedPersonaId;
-              return (
-                <button
-                  key={persona.id}
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => handlePersonaSelect(persona.id)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors ${
-                    isSelected
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-sidebar-border"
-                      : "hover:bg-sidebar-accent/60"
-                  }`}
-                >
-                  <Avatar className="size-8 shrink-0">
-                    <AvatarFallback className="text-xs font-semibold">
-                      {persona.initial}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {persona.label}
-                  </span>
-                </button>
-              );
-            })}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Separator className="bg-sidebar-border" />
-
-      <div className="flex items-center gap-3 p-3">
-        <Avatar className="size-8 shrink-0">
-          {user?.avatar ? (
-            <AvatarImage src={user.avatar} alt={user.name ?? "User"} />
-          ) : null}
-          <AvatarFallback className="text-xs">
-            {getInitials(user?.name, user?.email)}
-          </AvatarFallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {user?.name ?? "User"}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
-            {user?.email}
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={handleLogout}>
-          Logout
-        </Button>
-      </div>
-    </>
-  );
-
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
       <PersonaSwitchDialog
@@ -494,22 +351,20 @@ export default function ChatPage() {
         onCancel={handlePersonaDialogCancel}
         onConfirm={handlePersonaDialogConfirm}
       />
-      {sidebarOpen ? (
-        <button
-          type="button"
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
-          aria-label="Close sidebar"
-          onClick={closeSidebar}
-        />
-      ) : null}
-
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 flex h-dvh min-h-0 w-[min(100vw-3rem,16rem)] shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform duration-200 ease-in-out md:relative md:z-auto md:h-full md:w-64 md:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        {sidebarPanel}
-      </aside>
+      <SidePanel
+        open={sidebarOpen}
+        onClose={closeSidebar}
+        conversationId={conversationId}
+        conversations={conversations}
+        isLoadingConversations={isLoadingConversations}
+        isBusy={isBusy}
+        selectedPersonaId={selectedPersonaId}
+        user={user}
+        onNewChat={handleNewChat}
+        onSelectConversation={handleSelectConversation}
+        onPersonaSelect={handlePersonaSelect}
+        onLogout={handleLogout}
+      />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:px-6">
