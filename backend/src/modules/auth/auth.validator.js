@@ -1,0 +1,11 @@
+import { ApiError } from "../../utils/ApiError.js";
+
+export const validateGoogleCredential = (req, res, next) => {
+  const { credential } = req.body;
+
+  if (!credential || typeof credential !== "string") {
+    return next(new ApiError(400, "Google credential is required"));
+  }
+
+  next();
+};
